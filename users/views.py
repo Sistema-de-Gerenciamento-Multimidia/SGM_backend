@@ -9,7 +9,7 @@ from rest_framework.permissions import IsAuthenticated
 
 class UserListView(viewsets.ViewSet):
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = (IsAuthenticated,)
 
     def list(self, request):
         queryset = User.objects.all()

@@ -1,30 +1,32 @@
 from django.contrib import admin
-from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
-from .models import User
+from django.contrib.auth.admin import UserAdmin
+from .models import CustomUser
 from .forms import UserCreationForm, UserChangeForm
 
-class UserAdmin(BaseUserAdmin):
+class UserAdmin(UserAdmin):
     # Formulários para adicionar e alterar usuários
-    form = UserChangeForm
     add_form = UserCreationForm
+    form = UserChangeForm
+    model = CustomUser
 
     # Campos exibidos no admin
-    list_display = ('email', 'username', 'name', 'is_staff', 'is_active')
-    list_filter = ('is_staff', 'is_superuser', 'is_active')
+    list_display = ('email', 'username', 'name', 'date_of_birth', 'is_staff', 'is_active', 'date_joined',)
+    list_filter = ('is_staff','is_active',)
     fieldsets = (
-        (None, {'fields': ('email', 'username', 'name', 'password', 'description')}),
-        ('Permissões', {'fields': ('is_staff', 'is_superuser', 'is_active')}),
-        ('Datas Importantes', {'fields': ('last_login', 'date_joined')}),
+        (None, {'fields': ('email', 'password',)}),
+        ('Informações Pessoais', {'fields': ('name', 'description', 'date_of_birth',)}),
+        ('Permissões', {'fields': ('is_staff', 'is_active', 'is_superuser', 'groups', 'user_permissions',)}),
+        ('Datas Importantes', {'fields': ('last_login', 'date_joined',)}),
     )
-    readonly_fields = ('date_joined', 'last_login')
     add_fieldsets = (
         (None, {
             'classes': ('wide',),
-            'fields': ('email', 'username', 'name', 'password1', 'password2'),
+            'fields': ('email', 'username', 'name', 'password1', 'password2',
+                       'description', 'date_of_birth', 'is_staff', 'is_active',),
         }),
     )
-    search_fields = ('email', 'username', 'name')
-    ordering = ('email',)
+    search_fields = ('email', 'username', 'name',)
+    ordering = ('-date_joined', 'email',)
 
 # Registro no admin
-admin.site.register(User, UserAdmin)
+admin.site.register(CustomUser, UserAdmin)

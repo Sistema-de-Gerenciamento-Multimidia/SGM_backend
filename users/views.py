@@ -7,7 +7,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 
 
-class UserListView(viewsets.ModelViewSet):
+class UserCRUDView(viewsets.ModelViewSet):
     queryset = CustomUser.objects.all()
     serializer_class = CustomUserUpdateListDetailSerializer
     permission_classes = [AllowAny]

@@ -14,7 +14,7 @@ class CustomUserUpdateListDetailSerializer(serializers.ModelSerializer):
         model = CustomUser
         fields = [
             'id', 'email', 'username', 'name', 'description', 
-            'profile_picture', 'date_of_birth',
+            'profile_picture', 'date_of_birth', 'date_joined',
         ]
         read_only_fields = ['id']
 

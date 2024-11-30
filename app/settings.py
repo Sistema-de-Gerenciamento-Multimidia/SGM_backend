@@ -14,6 +14,10 @@ from pathlib import Path
 from datetime import timedelta
 from dotenv import load_dotenv
 import os
+import cloudinary
+import cloudinary.uploader
+import cloudinary.api
+import cloudinary_storage
 
 load_dotenv(
     dotenv_path=".env",
@@ -46,9 +50,12 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'corsheaders',
+    'cloudinary_storage',
+    'cloudinary',
     
     "authentication",
     "users",
+    "django_cleanup.apps.CleanupConfig",
 ]
 
 # Cloudinary
@@ -146,9 +153,6 @@ AUTH_PASSWORD_VALIDATORS = [
     },
     {
         'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
     },
     {
         'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',

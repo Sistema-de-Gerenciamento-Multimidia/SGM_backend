@@ -8,5 +8,5 @@ router.register(r'users', UserCRUDView, basename='user')
 
 urlpatterns = [
     path('', include(router.urls)),
-    path('change-password/<int:user_id>', ChangeUserPasswordView.as_view(), name='change-user-password')
+    path('change-password/<int:user_id>/', ChangeUserPasswordView.as_view(), name='change-user-password')
 ]

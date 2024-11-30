@@ -5,6 +5,7 @@ from users.serializers import CustomUserCreateSerializer, CustomUserUpdateListDe
 from users.models import CustomUser
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
+from .permissions import IsUserOrAdmin
 
 
 class UserCRUDView(viewsets.ModelViewSet):
@@ -21,9 +22,9 @@ class UserCRUDView(viewsets.ModelViewSet):
     def get_permissions(self):
         permission_classes = self.permission_classes
         
-        if self.action in ['retrieve', 'update']:
-            permission_classes = [IsAuthenticated]
-        elif self.action in ['list', 'partial_update', 'destroy']:
+        if self.action in ['retrieve', 'partial_update', 'update']:
+            permission_classes = [IsUserOrAdmin]
+        elif self.action in ['list', 'destroy']:
             permission_classes = [IsAdminUser, IsAuthenticated]
         elif self.action in ['create']:
             permission_classes = [AllowAny]
@@ -58,8 +59,13 @@ class ChangeUserPasswordView(APIView):
         if self.request.user.is_staff and user_id:
             user = CustomUser.objects.filter(id=user_id).first()
         # Quando é o próprio usuário alterando a senha
-        else:
+        elif user_id == self.request.user.id:
             user = request.user
+        else:
+            return Response(
+                data={'message': 'Você não tem permissão para realiza essa ação.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
         
         serializer = ChangeUserPasswordSerializer(data=request.data, context={'request': request, 'user': user})
         serializer.is_valid(raise_exception=True)

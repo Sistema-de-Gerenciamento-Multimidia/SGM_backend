@@ -1,5 +1,4 @@
 import os
-from cloudinary.models import CloudinaryField
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
 from django.utils import timezone
@@ -12,8 +11,8 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
     username = models.CharField(max_length=50, unique=True)
     name = models.CharField(max_length=100)
     description = models.TextField(max_length=500, blank=True, null=True)
-    profile_picture = CloudinaryField(
-        'image',
+    profile_picture = models.ImageField(
+        upload_to='image/',
         null=True,
         blank=True,
         default=os.environ.get('DEFAULT_PROFILE_PICTURE_URL')
@@ -28,6 +27,8 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
     USERNAME_FIELD = 'username'
     REQUIRED_FIELDS = ['name', 'email']
 
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
 
     def  __str__(self):
         return self.email

@@ -1,4 +1,3 @@
-import os
 from django.contrib.auth.tokens import PasswordResetTokenGenerator
 from django.urls import reverse
 from django.utils.timezone import now, timedelta
@@ -6,7 +5,7 @@ from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from services.mailgun.client import send_password_reset_email, send_password_reset_confirmation
+from services.email_sender.send_password_reset_emails import send_password_reset_email, send_password_reset_confirmation
 from users.models import CustomUser
 from .serializers import RequestPasswordResetSerializer, PasswordResetConfirmationSerializer
 from .models import PasswordReset
@@ -80,10 +79,11 @@ class PasswordResetConfirmationView(APIView):
             # Checa se o token ainda está valido
             token = self.kwargs.get('token')
             reset_obj = PasswordReset.objects.filter(token__exact=token).first()
+            print(reset_obj)
             if not reset_obj or (now() - timedelta(hours=24)) > reset_obj.created_at:
                 return Response(
                     data={
-                        'error': 'Invalid or expired token.'
+                        'error': 'Token inválido ou expirado.'
                     },
                     status=status.HTTP_400_BAD_REQUEST
                 )

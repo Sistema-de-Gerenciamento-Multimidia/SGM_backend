@@ -1,6 +1,6 @@
 import os
-import requests
-from requests.exceptions import RequestException
+from django.conf import settings
+from django.core.mail import send_mail
 
 
 def send_password_reset_email(email, reset_url):
@@ -12,15 +12,6 @@ def send_password_reset_email(email, reset_url):
     :raises RequestException: Em caso de erro no envio do e-mail.
     """
     try:
-        api_key = os.environ.get('EMAIL_SERVICE_API_KEY')
-        domain_name = os.environ.get('EMAIL_SERVICE_DOMAIN_NAME')
-        sender = os.environ.get('EMAIL_SENDER')
-        
-        service_url = f"https://api.mailgun.net/v3/{domain_name}/messages"
-        
-        if not all([api_key, domain_name, sender]):
-            raise ValueError("Erro nas configurações necessárias para envio do email.")
-        
         html_content = f"""
         <!DOCTYPE html>
         <html>
@@ -106,22 +97,18 @@ def send_password_reset_email(email, reset_url):
 
         Equipe de Suporte - SGM
         """
-        
-        response = requests.post(
-            url=service_url,
-            auth=('api', api_key),
-            data={
-                'from': f'SGM Suporte <{sender}>',
-                'to': email,
-                'subject': 'Redefinição de senha',
-                'text': plain_text_content,
-                'html': html_content,
-            }
+        send_mail(
+            subject='Redefinição de Senha',
+            message=plain_text_content,
+            from_email=f"SGM Suporte <{settings.EMAIL_HOST_USER}>",
+            recipient_list=[email],
+            auth_password=settings.EMAIL_HOST_PASSWORD,
+            html_message=html_content
         )
-        response.raise_for_status()
-        
-    except RequestException as re:
-        raise RequestException(f"Erro ao enviar o email para o destinatário: {re}")
+    
+    except Exception as e:
+        # logger.error({e})
+        raise Exception('Erro ao realizar o envio do email ao(s) destinatário(s)')
 
 def send_password_reset_confirmation(email, name):
     """
@@ -131,15 +118,6 @@ def send_password_reset_confirmation(email, name):
     :param name: Nome do usuário
     """
     try:
-        api_key = os.environ.get('EMAIL_SERVICE_API_KEY')
-        domain_name = os.environ.get('EMAIL_SERVICE_DOMAIN_NAME')
-        sender = os.environ.get('EMAIL_SENDER')
-        
-        service_url = f"https://api.mailgun.net/v3/{domain_name}/messages"
-        
-        if not all([api_key, domain_name, sender]):
-            raise ValueError("Erro nas configurações necessárias para envio do email.")
-        
         html_content = f"""
         <!DOCTYPE html>
         <html lang="pt-br">
@@ -230,21 +208,18 @@ def send_password_reset_confirmation(email, name):
         Se você tiver dúvidas ou precisar de mais informações, entre em contato com o suporte pelo e-mail: support@sgm.com
         """
         
-        response = requests.post(
-            url=service_url,
-            auth=('api', api_key),
-            data={
-                'from': f'SGM Suporte <{sender}>',
-                'to': email,
-                'subject': 'Senha atualizada com Sucesso',
-                'text': plain_text_content,
-                'html': html_content
-            }
+        send_mail(
+            subject='Senha Atualizada com Sucesso',
+            message=plain_text_content,
+            from_email=f"SGM Suporte <{settings.EMAIL_HOST_USER}>",
+            recipient_list=[email],
+            auth_password=settings.EMAIL_HOST_PASSWORD,
+            html_message=html_content
         )
-        response.raise_for_status()
     
-    except RequestException as re:
-        raise RequestException(f"Erro ao enviar o email ao destinatário: {re}")
+    except Exception as e:
+        #logger.error({e})
+        raise Exception('Ocorreu um erro no processo de envio do email ao(s) destinatário(s)')
         
         
     

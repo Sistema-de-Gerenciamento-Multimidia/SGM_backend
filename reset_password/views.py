@@ -1,3 +1,4 @@
+import os
 from django.contrib.auth.tokens import PasswordResetTokenGenerator
 from django.urls import reverse
 from django.utils.timezone import now, timedelta
@@ -47,7 +48,7 @@ class PasswordResetRequestView(APIView):
             
             # Constroi url para redefinição de senha
             relative_url = reverse('password-reset-confirmation', kwargs={'token': token})
-            reset_url = self.request.build_absolute_uri(relative_url)
+            reset_url = f'{os.environ.get('FRONTEND_BASE_URL', )}{relative_url}'
             
             send_password_reset_email(email, reset_url)
             

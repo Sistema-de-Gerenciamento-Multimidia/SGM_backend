@@ -10,6 +10,8 @@ urlpatterns = [
     path('api/v1/', include("authentication.urls")),
 
     path('api/v1/', include("users.urls")),
+    
+    path('api/v1/user/', include('reset_password.urls'))
 ]
 
 if settings.DEBUG: # Apenas para debug = True

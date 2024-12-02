@@ -55,6 +55,7 @@ INSTALLED_APPS = [
     
     "authentication",
     "users",
+    "reset_password",
     "django_cleanup.apps.CleanupConfig",
 ]
 

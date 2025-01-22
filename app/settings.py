@@ -132,19 +132,19 @@ WSGI_APPLICATION = 'app.wsgi.application'
 
 DATABASES = {
     # Banco local usado para testes em localhost
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    },
-    # Banco usado para testes de integração com front end
     # 'default': {
-    #     'ENGINE': 'django.db.backends.postgresql',
-    #     'NAME': os.environ.get('RDS_DB_NAME'),
-    #     'USER': os.environ.get('RDS_DB_USER'),
-    #     'PASSWORD': os.environ.get('RDS_DB_PASSWORD'),
-    #     'HOST': os.environ.get('RDS_DB_HOST'),
-    #     'PORT': os.environ.get('RDS_DB_PORT')
+    #     'ENGINE': 'django.db.backends.sqlite3',
+    #     'NAME': BASE_DIR / 'db.sqlite3',
     # },
+    # Banco rds usado para integração com front end
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.environ.get('RDS_DB_NAME'),
+        'USER': os.environ.get('RDS_DB_USER'),
+        'PASSWORD': os.environ.get('RDS_DB_PASSWORD'),
+        'HOST': os.environ.get('RDS_DB_HOST'),
+        'PORT': os.environ.get('RDS_DB_PORT')
+    },
 }
 
 # Email settings

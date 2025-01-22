@@ -36,7 +36,22 @@ class AWSServices:
         )
         
         return generate_s3_url(user_id, file_unique_name, is_thumbnail=False)
+    
+    def upload_audio_to_s3(self, audio_filename: str, audio_path: str, user_id: int):
+        file_unique_name = f"{uuid.uuid4().hex}_audio_{audio_filename}"
+        
+        s3_key = f'user/{user_id}/audios/{file_unique_name}'
+        
+        self.__aws_s3_client.upload_file(
+            audio_path,
+            os.environ.get('AWS_BUCKET_NAME'),
+            s3_key,
+        )
+        
+        return generate_s3_url(user_id, file_unique_name, is_thumbnail=False, is_audio=True)
 
+    def download_audio_from_s3(self, s3_path, local_path):
+        self.__aws_s3_client.download_file(os.environ.get('AWS_BUCKET_NAME'), s3_path, local_path)
     
     def upload_file_to_s3(self, video_filename: str, thumbnail: io.BytesIO, user_id: int):
         try:

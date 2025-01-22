@@ -12,6 +12,8 @@ urlpatterns = [
     path('api/v1/', include("users.urls")),
     
     path('api/v1/', include("video.urls")),
+    
+    path('api/v1/', include('audio.urls')),
 
     path('api/v1/', include("image.urls")),
     

@@ -3,7 +3,7 @@ import uuid
 from urllib.parse import urlparse
 
 
-def generate_s3_url(user_id: int, filename: str, is_thumbnail=False, thumbnail_unique_name=''):
+def generate_s3_url(user_id: int, filename: str, is_thumbnail=False, thumbnail_unique_name='', is_audio=False):
     """
     Gera o link público para o vídeo ou thumbnail armazenado no S3.
     
@@ -16,6 +16,8 @@ def generate_s3_url(user_id: int, filename: str, is_thumbnail=False, thumbnail_u
     
     if is_thumbnail:
         s3_path = f'user/{user_id}/videos/{thumbnail_unique_name}'
+    elif is_audio:
+        s3_path = f'user/{user_id}/audios/{filename}'
     else:
         s3_path = f'user/{user_id}/videos/{filename}'
     

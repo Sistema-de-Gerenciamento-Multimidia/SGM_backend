@@ -27,7 +27,7 @@ class Video(models.Model):
     # }
     
     description = models.TextField(null=True, blank=True)
-    tags = models.JSONField(default=list, null=True, blank=True)
+    tags = models.CharField(max_length=255, null=True, blank=True)
     genre = models.CharField(max_length=255, blank=True, null=True)
     
     user = models.ForeignKey(CustomUser, on_delete=models.PROTECT, related_name="videos")

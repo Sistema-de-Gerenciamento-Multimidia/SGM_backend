@@ -1,5 +1,3 @@
-import os
-from django.conf import settings
 from rest_framework import serializers
 from video.models import Video
 
@@ -44,4 +42,4 @@ class VideoPartialUpdateSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Video
-        fields = ['description', 'tags', 'genre', 'file_name']
+        fields = ['description', 'tags', 'file_name']

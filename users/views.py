@@ -1,11 +1,16 @@
 from django.db.utils import IntegrityError
 from rest_framework import viewsets, serializers, status
+from rest_framework.decorators import action
 from rest_framework.views import APIView
 from users.serializers import CustomUserCreateSerializer, CustomUserUpdateListDetailSerializer, ChangeUserPasswordSerializer
 from users.models import CustomUser
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from .permissions import IsUserOrAdmin
+from video.models import Video
+from video.serializers import VideoUpdateListDetailSerializer
+from audio.models import Audio
+from audio.serializers import AudioUpdateListDetailSerializer
 
 
 class UserCRUDView(viewsets.ModelViewSet):
@@ -48,6 +53,34 @@ class UserCRUDView(viewsets.ModelViewSet):
         
         except IntegrityError:
             raise serializers.ValidationError({'detail': 'Erro ao salvar o usuário. Verifique os dados e tente novamente.'})
+    
+    @action(detail=True, methods=['GET'], url_path="all-media") 
+    def get_all_media_files(self, request, pk=None):
+        try:
+            user = self.get_object()
+            
+            user_videos = Video.objects.filter(user=user).all()
+            user_audios = Audio.objects.filter(user=user).all()
+            
+            video_serializer = VideoUpdateListDetailSerializer(user_videos, many=True)
+            audio_serializer = AudioUpdateListDetailSerializer(user_audios, many=True)
+            
+            response_data = {
+                'user': {
+                    'id': user.id,
+                    'username': user.username,
+                    'email': user.email,
+                    'name': user.name,
+                },
+                'videos': video_serializer.data,
+                'audios': audio_serializer.data
+            }
+
+            return Response(response_data, status=status.HTTP_200_OK)
+        except CustomUser.DoesNotExist:
+            return Response({'detail': 'Usuário não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class ChangeUserPasswordView(APIView):
     permission_classes = [IsAuthenticated]

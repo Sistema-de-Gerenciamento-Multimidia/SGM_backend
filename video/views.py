@@ -118,7 +118,10 @@ class VideoCRUDView(viewsets.ModelViewSet):
             user = self.request.user
             all_videos = Video.objects.filter(user=user).all()
             if not all_videos:
-                raise ValueError('Nenhum vídeo foi encontrado.')
+                raise Response(
+                    data={'detail': "Nenhum vídeo foi encontrado."},
+                    status=status.HTTP_404_NOT_FOUND
+                )
         
             serializer = VideoUpdateListDetailSerializer(instance=all_videos, many=True)
             

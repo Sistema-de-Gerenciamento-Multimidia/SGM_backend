@@ -50,6 +50,8 @@ class VideoCRUDView(viewsets.ModelViewSet):
             
             video_file = serializer.validated_data.get('video_file')
             video_file_name = video_file.name
+            if Video.objects.filter(file_name=video_file_name, user=self.request.user).exists():
+                return Response({'detail': 'Já existe um vídeo com este nome.'}, status=status.HTTP_400_BAD_REQUEST)
             video_file_path = os.path.join(settings.MEDIA_ROOT, 'video_files', video_file_name)
             
             os.makedirs(os.path.dirname(video_file_path), exist_ok=True)

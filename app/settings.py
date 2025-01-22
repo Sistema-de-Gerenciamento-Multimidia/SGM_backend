@@ -139,11 +139,11 @@ DATABASES = {
     # Banco usado para testes de integração com front end
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.environ.get('TEST_DB_NAME'),
-        'USER': os.environ.get('TEST_DB_USER'),
-        'PASSWORD': os.environ.get('TEST_DB_PASSWORD'),
-        'HOST': os.environ.get('TEST_DB_HOST'),
-        'PORT': os.environ.get('TEST_DB_PORT')
+        'NAME': os.environ.get('RDS_DB_NAME'),
+        'USER': os.environ.get('RDS_DB_USER'),
+        'PASSWORD': os.environ.get('RDS_DB_PASSWORD'),
+        'HOST': os.environ.get('RDS_DB_HOST'),
+        'PORT': os.environ.get('RDS_DB_PORT')
     },
 }
 

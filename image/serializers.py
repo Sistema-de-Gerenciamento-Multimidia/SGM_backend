@@ -1,5 +1,3 @@
-import os
-from django.conf import settings
 from rest_framework import serializers
 from image.models import Image
 
@@ -9,31 +7,31 @@ class ImageUpdateListDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = Image
         fields = ['id', 'user', 'file_name', 'file_size', 'file_path', 'upload_date', 'mime_type', 
-                  'description', 'tags', 'genre',]
+                  'description', 'tags', 'dimensions', 'color_depth', 'resolution', 'exif_metadata',
+                  'updated_at',]
         read_only_fields = [
             'id', 'user', 'file_size', 'upload_date', 'mime_type', 
-            'duration', 'resolution', 'frame_rate',
+            'dimensions', 'color_depth', 'resolution', 'exif_metadata', 'updated_at',
         ]
 
 class ImageCreateSerializer(serializers.ModelSerializer):
     image_file = serializers.FileField(write_only=True, required=True)
     
-    
-    ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/jpg']
-    MAX_FILE_SIZE = 50 * 1024 * 1024 # Máximo de 50MB
+    ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/svg+xml', 'image/webp']
+    MAX_FILE_SIZE = 10 * 1024 * 1024 # Máximo de 10MB
     class Meta:
         model = Image
-        fields = ['description', 'tags', 'genre', 'image_file']
+        fields = ['description', 'tags', 'image_file']
     
-    def validate_iamge_file(self, value):
+    def validate_image_file(self, value):
         image_type = value.content_type
         image_size = value.size
         
         if image_type not in self.ALLOWED_TYPES:
-            raise serializers.ValidationError({'detail': f"Formato de imagem não permitido. Tipos aceitos: PNG, JPEG, JPG"})
+            raise serializers.ValidationError({'detail': f"Formato de imagem não permitido. Tipos aceitos: JPEG, PNG, GIF, SVG, WebP"})
         
         if image_size > self.MAX_FILE_SIZE:
-            raise serializers.ValidationError({'detail': 'Tamanho do arquivo não pode ser maior que 50MB.'})
+            raise serializers.ValidationError({'detail': 'Tamanho do arquivo não pode ser maior que 10MB.'})
         
         return value
 

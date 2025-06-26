@@ -18,6 +18,7 @@ import cloudinary
 import cloudinary.uploader
 import cloudinary.api
 import cloudinary_storage
+from kombu import Exchange, Queue
 
 load_dotenv(
     dotenv_path=".env",
@@ -131,19 +132,9 @@ WSGI_APPLICATION = 'app.wsgi.application'
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
 DATABASES = {
-    # Banco local usado para testes em localhost
-    # 'default': {
-    #     'ENGINE': 'django.db.backends.sqlite3',
-    #     'NAME': BASE_DIR / 'db.sqlite3',
-    # },
-    # Banco rds usado para integração com front end
     'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.environ.get('RDS_DB_NAME'),
-        'USER': os.environ.get('RDS_DB_USER'),
-        'PASSWORD': os.environ.get('RDS_DB_PASSWORD'),
-        'HOST': os.environ.get('RDS_DB_HOST'),
-        'PORT': os.environ.get('RDS_DB_PORT')
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3',
     },
 }
 
@@ -182,6 +173,43 @@ TIME_ZONE = 'UTC'
 USE_I18N = True
 
 USE_TZ = True
+
+# Celery Exchange and Queue configurations
+default_task_queue = 'default'
+default_exchange = Exchange('default', type='direct')
+video_exchange = Exchange('video', type='direct')
+metadata_extract_exchange = Exchange('metadata', type='direct')
+thumbnail_generation_exchange = Exchange('video_thumbnail', type='direct')
+finalize_video_processing_exchange = Exchange('end_video_processing', type='direct')
+
+# Celery Configuration Options
+CELERY_BROKER_URL = "redis://127.0.0.1:6379/0"
+CELERY_RESULT_BACKEND = f"redis://127.0.0.1:6379/0"
+CELERY_TASK_QUEUES = [
+    Queue(
+        name='video_resolution_process_queue',
+        exchange=video_exchange,
+        routing_key='video_processing'
+    ),
+    Queue(
+        name='metadata_extract_processing_queue',
+        exchange=metadata_extract_exchange,
+        routing_key='metadata_extraction'
+    ),
+    Queue(
+        name='thumbnail_generation_queue',
+        exchange=thumbnail_generation_exchange,
+        routing_key='thumbnail_generation'
+    ),
+    Queue(
+        name='finalize_video_process',
+        exchange=finalize_video_processing_exchange,
+        routing_key='finalize_video_processing'
+    )
+]
+CELERY_TASK_DEFAULT_QUEUE = default_task_queue
+CELERY_TASK_DEFAULT_EXCHANGE = 'default'
+CELERY_TASK_DEFAULT_ROUTING_KEY = 'default'
 
 
 # Static files (CSS, JavaScript, Images)

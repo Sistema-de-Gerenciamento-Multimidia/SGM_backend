@@ -9,11 +9,11 @@ class VideoUpdateListDetailSerializer(serializers.ModelSerializer):
         fields = ['id', 'user', 'file_name', 'file_size', 'file_path', 'upload_date', 'mime_type', 
                   'duration', 'resolution', 'frame_rate', 'video_codec', 'audio_codec',
                   'bitrate', 'thumbnail_path', 'processing_details', 'description', 'tags',
-                  'genre',]
+                  'genre', 'status', 'updated_at', ]
         read_only_fields = [
             'id', 'user', 'file_size', 'upload_date', 'mime_type', 
             'duration', 'resolution', 'frame_rate', 'video_codec', 'audio_codec',
-            'bitrate', 'thumbnail_path', 'processing_details'
+            'bitrate', 'thumbnail_path', 'processing_details', 'status', 'updated_at',
         ]
 
 class VideoCreateSerializer(serializers.ModelSerializer):

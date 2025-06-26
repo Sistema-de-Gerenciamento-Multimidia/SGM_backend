@@ -7,10 +7,11 @@ class AudioUpdateListDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = Audio
         fields = ('id', 'user', 'file_name', 'file_size', 'mime_type', 'file_path', 'duration',
-                  'bitrate', 'sample_rate', 'channels', 'description', 'tags', 'genre')
+                  'bitrate', 'sample_rate', 'channels', 'description', 'tags', 'genre',
+                  'updated_at', )
         read_only_fields = [
             'id', 'user', 'file_size', 'mime_type', 'file_path', 'duration', 'bitrate',
-            'sample_rate', 'channels',
+            'sample_rate', 'channels', 'updated_at',
         ]
 
 class AudioCreateSerializer(serializers.ModelSerializer):

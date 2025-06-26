@@ -5,6 +5,7 @@ from users.models import CustomUser
 class Audio(models.Model):
     file_name = models.CharField(max_length=255, null=False, blank=False)
     file_size = models.BigIntegerField()
+    file_hash = models.CharField(max_length=255, unique=True, null=False, blank=False) # Nome único do arquivo salvo no servidor para controle de duplicações
     upload_date = models.DateTimeField(auto_now_add=True)
     mime_type = models.CharField(max_length=255)
     file_path = models.CharField(max_length=255, null=False, blank=False, unique=True)
@@ -17,10 +18,12 @@ class Audio(models.Model):
 
     # Propriedades definidas pelo usuário
     description = models.TextField(null=True, blank=True)
-    tags = models.CharField(max_length=255, null=True, blank=True)  # Lista de tags como JSON
+    tags = models.JSONField(default=list, null=True, blank=True)  # Lista de tags como JSON
     genre = models.CharField(max_length=100, null=True, blank=True)
     
     user = models.ForeignKey(CustomUser, on_delete=models.PROTECT, related_name="audios")
+
+    updated_at = models.DateTimeField(auto_now=True)
     
     def __str__(self):
         return f"Audio: {self.file_name} - Upload Date: {self.upload_date} - File Size: {self.file_size}"

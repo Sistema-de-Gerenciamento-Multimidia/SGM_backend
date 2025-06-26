@@ -4,7 +4,9 @@ from botocore.exceptions import BotoCoreError, NoCredentialsError
 from django.conf import settings
 from django.db import transaction
 from django.db.utils import IntegrityError
+from django.http import Http404
 from rest_framework import viewsets, serializers, status
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
@@ -43,11 +45,11 @@ class ImageCRUDView(viewsets.ModelViewSet):
             image_file = serializer.validated_data.get('image_file')
             image_file_name = image_file.name
             image_file_path = os.path.join(settings.MEDIA_ROOT, 'image', image_file_name)
-            image_file_hash = generate_sha256_file_hash(image_file)
+            image_file_hash = generate_sha256_file_hash(image_file, self.request.user)
             
-            if is_file_duplicated(image_file_hash, 'Image'):
+            if is_file_duplicated(image_file_hash, 'Image', self.request.user):
                 return Response(
-                    data={'error': 'Arquivo já enviado anteriormente ao sistema.'},
+                    data={'detail': 'Arquivo já enviado anteriormente ao sistema.'},
                     status=status.HTTP_409_CONFLICT
                 )
             
@@ -81,17 +83,8 @@ class ImageCRUDView(viewsets.ModelViewSet):
         except serializers.ValidationError as e:
             return Response({'detail': f'Dados inválidos. Verifique e tente novamente'}, status=status.HTTP_400_BAD_REQUEST)
 
-        except NoCredentialsError:
-            return Response({'detail': 'Erro ao acessar o S3: credenciais ausentes.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-        except BotoCoreError as e:
-            return Response({'detail': 'Erro ao fazer upload do vídeo para o S3.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
         except IntegrityError:
             return Response({'detail': 'Erro ao salvar o vídeo. Verifique os dados e tente novamente. '}, status=status.HTTP_400_BAD_REQUEST)
-
-        except subprocess.CalledProcessError:
-            return Response({'detail': 'Erro durante o processamento da imagem'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
         except FileNotFoundError as e:
             return Response({'detail': f'Arquivo de vídeo não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
@@ -112,21 +105,9 @@ class ImageCRUDView(viewsets.ModelViewSet):
                 data=serializer.data,
                 status=status.HTTP_200_OK
             )
-        
-        except ValueError:
-            return Response({'detail': 'Vídeo não encontrado'}, status=status.HTTP_404_NOT_FOUND)
-        
-        except NoCredentialsError:
-            return Response({'detail': 'Erro ao acessar o S3: credenciais ausentes.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-        except BotoCoreError as e:
-            return Response({'detail': 'Erro ao fazer upload da imagem para o S3.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         except IntegrityError:
             return Response({'detail': 'Erro ao salvar a imagem. Verifique os dados e tente novamente. '}, status=status.HTTP_400_BAD_REQUEST)
-
-        except subprocess.CalledProcessError:
-            return Response({'detail': 'Erro durante o processamento da imagem'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
         except FileNotFoundError as e:
             return Response({'detail': f'Arquivo de imagem não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
@@ -139,7 +120,7 @@ class ImageCRUDView(viewsets.ModelViewSet):
             image_id = self.kwargs.get('pk')
             image_object = Image.objects.filter(id=image_id, user=self.request.user).first()
             if not image_object:
-                raise ValueError('Imagem não encontrada.')
+                raise Http404({'detail': "Arquivo de imagem não encontrado."})
         
             serializer = ImageUpdateListDetailSerializer(instance=image_object)
             
@@ -147,21 +128,12 @@ class ImageCRUDView(viewsets.ModelViewSet):
                 data=serializer.data,
                 status=status.HTTP_200_OK
             )
+
+        except PermissionDenied as pe:
+            return Response({'detail': "Arquivo de imagem não encontrado."}, status=status.HTTP_404_NOT_FOUND)
         
-        except ValueError:
-            return Response({'detail': 'Imagem não encontrado'}, status=status.HTTP_404_NOT_FOUND)
-        
-        except NoCredentialsError:
-            return Response({'detail': 'Erro ao acessar o S3: credenciais ausentes.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-        except BotoCoreError as e:
-            return Response({'detail': 'Erro ao fazer upload da imagem para o S3.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-        except IntegrityError:
-            return Response({'detail': 'Erro ao salvar a imagem. Verifique os dados e tente novamente. '}, status=status.HTTP_400_BAD_REQUEST)
-
-        except subprocess.CalledProcessError:
-            return Response({'detail': 'Erro durante o processamento da imagem'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        except IntegrityError as ie:
+            return Response({'detail': "Erro ao salvar a imagem. Verifique os dados e tente novamente."}, sttaus=status.HTTP_404_NOT_FOUND)
         
         except FileNotFoundError as e:
             return Response({'detail': f'Arquivo de imagem não encontrado. '}, status=status.HTTP_404_NOT_FOUND)
@@ -180,7 +152,7 @@ class ImageCRUDView(viewsets.ModelViewSet):
             # Obtendo a imagem existente
             image_instance = self.get_object()
             if not image_instance:
-                raise ValueError('Imagem não encontrada.')
+                raise Http404({"detail": "Imagem não encontrada."})
 
             # Valida os dados recebidos no request
             serializer = self.get_serializer(image_instance, data=request.data, partial=True)
@@ -203,7 +175,7 @@ class ImageCRUDView(viewsets.ModelViewSet):
                     image_instance.file_path = new_image_path
                 else:
                     return Response(
-                        data={'error': 'Arquivo original não encontrado.'},
+                        data={'detail': 'Arquivo original não encontrado.'},
                         status=status.HTTP_404_NOT_FOUND
                     )
                 
@@ -221,24 +193,19 @@ class ImageCRUDView(viewsets.ModelViewSet):
                 data=ImageUpdateListDetailSerializer(image_instance).data,
                 status=status.HTTP_200_OK
             )
-        
-        except ValueError:
-            return Response({'detail': 'Imagem não encontrado'}, status=status.HTTP_404_NOT_FOUND)
-        
-        except NoCredentialsError:
-            return Response({'detail': 'Erro ao acessar o S3: credenciais ausentes.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-        except BotoCoreError as e:
-            return Response({'detail': 'Erro ao fazer upload da imagem para o S3.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         except IntegrityError:
             return Response({'detail': 'Erro ao salvar a imagem. Verifique os dados e tente novamente. '}, status=status.HTTP_400_BAD_REQUEST)
-
-        except subprocess.CalledProcessError:
-            return Response({'detail': 'Erro durante o processamento da imagem.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
-        except FileExistsError:
-            return Response({'detail': 'Já existe um arquivo com esse nome.'}, status=status.HTTP_409_CONFLICT)
+        except OSError as ose:
+            #logger.error(ose)
+            return Response({'detail': 'Erro durante o processo de alteração do arquivo de imagem.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        except FileNotFoundError as fnfe:
+            return Response({'detail': f'Arquivo de imagem não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+        
+        except PermissionDenied as pe:
+            return Response({'detail': 'Arquivo de imagem não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
 
         except Exception as e:
             return Response({'detail': f'Ocorreu um erro inesperado. Tente novamente mais tarde.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -250,30 +217,18 @@ class ImageCRUDView(viewsets.ModelViewSet):
             image_id = self.kwargs.get('pk')
             image_object = Image.objects.filter(id=image_id, user=self.request.user).first()
             if not image_object:
-                raise ValueError('Imagem não encontrado.')
+                raise Http404({'detail': 'Imagem não encontrada.'})
             
             # Remove a imagem do diretório de imagens
             remove_media(image_object.file_path)
             
             return super().destroy(request, *args, **kwargs)
-        
-        except ValueError:
-            return Response({'detail': 'Imagem não encontrado'}, status=status.HTTP_404_NOT_FOUND)
-        
-        except NoCredentialsError:
-            return Response({'detail': 'Erro ao acessar o S3: credenciais ausentes.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        except BotoCoreError as e:
-            return Response({'detail': 'Erro ao fazer upload da imagem para o S3.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        except PermissionDenied as pe:
+            return  Response({'detail': 'Arquivo de vídeo não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
 
         except IntegrityError:
             return Response({'detail': 'Erro ao salvar a imagem. Verifique os dados e tente novamente. '}, status=status.HTTP_400_BAD_REQUEST)
-
-        except subprocess.CalledProcessError:
-            return Response({'detail': 'Erro durante o processamento doa imagem'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-        except FileNotFoundError as e:
-            return Response({'detail': f'Arquivo de imagem não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
 
         except Exception as e:
             return Response({'detail': f'Ocorreu um erro inesperado. Tente novamente mais tarde. '}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

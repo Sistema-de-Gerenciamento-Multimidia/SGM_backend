@@ -1,24 +1,16 @@
 import os
-import subprocess
-from botocore.exceptions import BotoCoreError, NoCredentialsError
 from django.conf import settings
 from django.db import transaction
 from django.db.utils import IntegrityError
+from django.http import Http404
+from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 from rest_framework import viewsets, serializers, status
-from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
-from app.services.aws_services import aws_services
 from video.permissions import IsUserOrAdmin
-from app.services.video_services import (
-    extract_video_info,
-    generate_video_thumbnail,
-    process_video_qualities,
-    save_video_in_temporary_file,
-    remove_video_in_temporary_file
-    
-)
-from app.utils.s3_utils import extract_s3_key
+from app.utils import save_media, remove_media, generate_sha256_file_hash, is_file_duplicated
+from app.tasks import process_upload_video
 from video.models import Video
 from video.serializers import VideoUpdateListDetailSerializer, VideoCreateSerializer
 
@@ -49,40 +41,49 @@ class VideoCRUDView(viewsets.ModelViewSet):
             serializer.is_valid(raise_exception=True)
             
             video_file = serializer.validated_data.get('video_file')
+            user_id = str(self.request.user.id)
+            
+            video_file_hash = generate_sha256_file_hash(video_file, self.request.user)
+            if is_file_duplicated(video_file_hash, 'Video', self.request.user):
+                return Response(
+                    data={'detail': 'Arquivo já enviado anteriormente ao sistema.'},
+                    status=status.HTTP_409_CONFLICT
+                )
+            
+            
+            # Definindo método de armazenamento dos arquivos de vídeo
+            user_videos_folder = os.path.join(settings.MEDIA_ROOT, 'video_files', 'user', user_id)
+            original_videos_folder = os.path.join(user_videos_folder, 'original')
+            processed_videos_folder = os.path.join(user_videos_folder, 'processed')
+            thumbnails_folder = os.path.join(user_videos_folder, 'thumbnails')
+            
+            os.makedirs(original_videos_folder, exist_ok=True)
+            os.makedirs(processed_videos_folder, exist_ok=True)
+            os.makedirs(thumbnails_folder, exist_ok=True)
+            
+            # Caminho do vídeo original
             video_file_name = video_file.name
-            video_file_path = os.path.join(settings.MEDIA_ROOT, 'video_files', video_file_name)
+            video_original_path = os.path.join(original_videos_folder, video_file_name)
             
-            os.makedirs(os.path.dirname(video_file_path), exist_ok=True)
-            save_video_in_temporary_file(video_file, video_file_path)
-            
-            # Processamento do vídeo em diferentes qualidades
-            processed_videos = process_video_qualities(video_file_path)
-            processed_video_paths = {}
-            
-            for quality, processed_video in processed_videos.items():
-                s3_path = aws_services.upload_video_to_s3(processed_video.split(os.sep)[-1], processed_video, self.request.user.id)
-                processed_video_paths[quality] = s3_path
-                remove_video_in_temporary_file(processed_video)
-            
-            metadata = extract_video_info(video_file_path)
-            thumbnail = generate_video_thumbnail(video_file_path)
-            
-            thumbnail_path = aws_services.upload_file_to_s3(video_file_name, thumbnail, self.request.user.id)
+            # Salva o arquivo original
+            save_media(video_file, video_original_path)
             
             with transaction.atomic():
                 video_instance = Video.objects.create(
                     file_name=video_file_name,
                     file_size=video_file.size,
+                    file_hash=video_file_hash,
                     mime_type=video_file.content_type,
-                    file_path=processed_video_paths['1080p'],
-                    thumbnail_path=thumbnail_path,
-                    processing_details=processed_video_paths,
+                    file_path=video_original_path,
                     description=serializer.validated_data.get('description', ''),
                     tags=serializer.validated_data.get('tags', []),
                     genre=serializer.validated_data.get('genre', ''),
                     user=self.request.user,
-                    **metadata
+                    status=Video.PROCESSING
                 )
+            
+            # Chamada do processamento assíncrono usando Celery
+            process_upload_video(video_instance.id, video_original_path)
             
             return Response(
                 data=VideoUpdateListDetailSerializer(video_instance).data,
@@ -92,36 +93,21 @@ class VideoCRUDView(viewsets.ModelViewSet):
         except serializers.ValidationError as e:
             return Response({'detail': f'Dados inválidos. Verifique e tente novamente'}, status=status.HTTP_400_BAD_REQUEST)
 
-        except NoCredentialsError:
-            return Response({'detail': 'Erro ao acessar o S3: credenciais ausentes.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-        except BotoCoreError as e:
-            return Response({'detail': 'Erro ao fazer upload do vídeo para o S3.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
         except IntegrityError:
             return Response({'detail': 'Erro ao salvar o vídeo. Verifique os dados e tente novamente. '}, status=status.HTTP_400_BAD_REQUEST)
-
-        except subprocess.CalledProcessError:
-            return Response({'detail': 'Erro durante o processamento do vídeo'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
         except FileNotFoundError as e:
             return Response({'detail': f'Arquivo de vídeo não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
 
         except Exception as e:
             return Response({'detail': f'Ocorreu um erro inesperado. Tente novamente mais tarde.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-        finally:
-            remove_video_in_temporary_file(video_file_path)
-    
+
     def list(self, request, *args, **kwargs):
         try:
             user = self.request.user
             all_videos = Video.objects.filter(user=user).all()
             if not all_videos:
-                raise Response(
-                    data={'detail': "Nenhum vídeo foi encontrado."},
-                    status=status.HTTP_404_NOT_FOUND
-                )
+                return Http404({"detail": "Arquivo de vídeo não encontrado."})
         
             serializer = VideoUpdateListDetailSerializer(instance=all_videos, many=True)
             
@@ -129,21 +115,9 @@ class VideoCRUDView(viewsets.ModelViewSet):
                 data=serializer.data,
                 status=status.HTTP_200_OK
             )
-        
-        except ValueError:
-            return Response({'detail': 'Vídeo não encontrado'}, status=status.HTTP_404_NOT_FOUND)
-        
-        except NoCredentialsError:
-            return Response({'detail': 'Erro ao acessar o S3: credenciais ausentes.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-        except BotoCoreError as e:
-            return Response({'detail': 'Erro ao fazer upload do vídeo para o S3.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         except IntegrityError:
             return Response({'detail': 'Erro ao salvar o vídeo. Verifique os dados e tente novamente. '}, status=status.HTTP_400_BAD_REQUEST)
-
-        except subprocess.CalledProcessError:
-            return Response({'detail': 'Erro durante o processamento do vídeo'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
         except FileNotFoundError as e:
             return Response({'detail': f'Arquivo de vídeo não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
@@ -156,7 +130,7 @@ class VideoCRUDView(viewsets.ModelViewSet):
             video_id = self.kwargs.get('pk')
             video_object = Video.objects.filter(id=video_id, user=self.request.user).first()
             if not video_object:
-                raise ValueError('Vídeo não encontrado.')
+                raise Http404({"detail": "Vídeo não encontrado."})
         
             serializer = VideoUpdateListDetailSerializer(instance=video_object)
             
@@ -164,21 +138,12 @@ class VideoCRUDView(viewsets.ModelViewSet):
                 data=serializer.data,
                 status=status.HTTP_200_OK
             )
-        
-        except ValueError:
-            return Response({'detail': 'Vídeo não encontrado'}, status=status.HTTP_404_NOT_FOUND)
-        
-        except NoCredentialsError:
-            return Response({'detail': 'Erro ao acessar o S3: credenciais ausentes.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        except BotoCoreError as e:
-            return Response({'detail': 'Erro ao fazer upload do vídeo para o S3.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        except PermissionDenied as fe:
+            return Response({"detail": "Arquivo de vídeo não encontrado."}, status=status.HTTP_404_NOT_FOUND)
 
         except IntegrityError:
             return Response({'detail': 'Erro ao salvar o vídeo. Verifique os dados e tente novamente. '}, status=status.HTTP_400_BAD_REQUEST)
-
-        except subprocess.CalledProcessError:
-            return Response({'detail': 'Erro durante o processamento do vídeo'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
         except FileNotFoundError as e:
             return Response({'detail': f'Arquivo de vídeo não encontrado. '}, status=status.HTTP_404_NOT_FOUND)
@@ -197,7 +162,7 @@ class VideoCRUDView(viewsets.ModelViewSet):
             # Obtendo o vídeo existente
             video_instance = self.get_object()
             if not video_instance:
-                raise ValueError('Vídeo não encontrado.')
+                raise Http404({"detail": "Vídeo não encontrado."})
 
             # Valida os dados recebidos no request
             serializer = self.get_serializer(video_instance, data=request.data, partial=True)
@@ -205,7 +170,46 @@ class VideoCRUDView(viewsets.ModelViewSet):
             
             # Atualizando o campo file_name
             if 'file_name' in serializer.validated_data:
-                video_instance.file_name = serializer.validated_data['file_name']
+                new_file_name = serializer.validated_data['file_name']
+                _, file_extension = os.path.splitext(video_instance.file_name)
+                new_file_name_with_ext = new_file_name + file_extension
+                
+                user_videos_folder = os.path.join(settings.MEDIA_ROOT, 'video_files', 'user', str(self.request.user.id))
+                original_videos_folder = os.path.join(user_videos_folder, 'original')
+                processed_videos_folder = os.path.join(user_videos_folder, 'processed')
+                
+                old_video_path = os.path.join(original_videos_folder, video_instance.file_name)
+                new_video_path = os.path.join(original_videos_folder, new_file_name_with_ext)
+                
+                # Verifica se existe o arquivo original
+                if os.path.exists(old_video_path):
+                    os.rename(old_video_path, new_video_path)
+                    video_instance.file_name = new_file_name_with_ext
+                    video_instance.file_path = new_video_path
+                    
+                    for resolution in ['1080p', '720p', '480p']:
+                        # Captura o nome antigo do vídeo processado
+                        old_processed_video_file_name, ext = os.path.splitext(video_instance.processing_details[resolution])
+                        old_processed_video_file_name_with_ext = f'{os.path.basename(old_processed_video_file_name)}{ext}'
+                        new_processed_video_file_name = f'{new_file_name}_{resolution}{ext}'
+                        
+                        old_processed_video_path = os.path.join(processed_videos_folder, old_processed_video_file_name_with_ext)
+                        new_processed_video_path = os.path.join(processed_videos_folder, new_processed_video_file_name)
+                        
+                        # Verifica se o vídeo processado existe
+                        if os.path.exists(old_processed_video_path):
+                            os.rename(old_processed_video_path, new_processed_video_path)
+                            video_instance.processing_details[resolution] = new_processed_video_path
+                        else:
+                            return Response(
+                                data={'detail': f'O vídeo processado em {resolution} não foi encontrado.'},
+                                status=status.HTTP_404_NOT_FOUND
+                            )
+                else:
+                    return Response(
+                        data={'detail': 'Arquivo de vídeo original não encontrado.'},
+                        status=status.HTTP_404_NOT_FOUND
+                    )
             
             # Atualizando os outros campos permitidos (tags, description, genre)
             if 'tags' in serializer.validated_data:
@@ -221,24 +225,19 @@ class VideoCRUDView(viewsets.ModelViewSet):
                 data=VideoUpdateListDetailSerializer(video_instance).data,
                 status=status.HTTP_200_OK
             )
-        
-        except ValueError:
-            return Response({'detail': 'Vídeo não encontrado'}, status=status.HTTP_404_NOT_FOUND)
-        
-        except NoCredentialsError:
-            return Response({'detail': 'Erro ao acessar o S3: credenciais ausentes.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-        except BotoCoreError as e:
-            return Response({'detail': 'Erro ao fazer upload do vídeo para o S3.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         except IntegrityError:
             return Response({'detail': 'Erro ao salvar o vídeo. Verifique os dados e tente novamente. '}, status=status.HTTP_400_BAD_REQUEST)
-
-        except subprocess.CalledProcessError:
-            return Response({'detail': 'Erro durante o processamento do vídeo'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        except OSError as ose:
+            #logger.error(ose)
+            return Response({'detail': 'Erro durante o processo de alteração do nome do arquivo de vídeo'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
         except FileNotFoundError as e:
             return Response({'detail': f'Arquivo de vídeo não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+
+        except PermissionDenied as fe:
+            return Response({"detail": "Arquivo de vídeo não encontrado."}, status=status.HTTP_404_NOT_FOUND)
 
         except Exception as e:
             return Response({'detail': f'Ocorreu um erro inesperado. Tente novamente mais tarde.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -250,37 +249,35 @@ class VideoCRUDView(viewsets.ModelViewSet):
             video_id = self.kwargs.get('pk')
             video_object = Video.objects.filter(id=video_id, user=self.request.user).first()
             if not video_object:
-                raise ValueError('Vídeo não encontrado.')
-            
-            # Remove thumbnail
-            aws_services.delete_object_from_s3(extract_s3_key(video_object.thumbnail_path))
-            
-            # Remove arquivos de vídeos processados
-            for _, value in video_object.processing_details.items():
-                aws_services.delete_object_from_s3(extract_s3_key(value))
+                raise Http404({"detail": 'Vídeo não encontrado.'})
+
+            remove_media(video_object.file_path)
             
             return super().destroy(request, *args, **kwargs)
-        
-        except ValueError:
-            return Response({'detail': 'Vídeo não encontrado'}, status=status.HTTP_404_NOT_FOUND)
-        
-        except NoCredentialsError:
-            return Response({'detail': 'Erro ao acessar o S3: credenciais ausentes.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        except BotoCoreError as e:
-            return Response({'detail': 'Erro ao fazer upload do vídeo para o S3.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
+        except PermissionDenied as fe:
+            return Response({"detail": "Arquivo de vídeo não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+        
         except IntegrityError:
             return Response({'detail': 'Erro ao salvar o vídeo. Verifique os dados e tente novamente. '}, status=status.HTTP_400_BAD_REQUEST)
 
-        except subprocess.CalledProcessError:
-            return Response({'detail': 'Erro durante o processamento do vídeo'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-        except FileNotFoundError as e:
-            return Response({'detail': f'Arquivo de vídeo não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
-
         except Exception as e:
-            return Response({'detail': f'Ocorreu um erro inesperado. Tente novamente mais tarde. '}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-        
+            return Response({'detail': 'Ocorreu um erro inesperado. Tente novamente mais tarde.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
+    @action(detail=True, methods=['GET'], url_path='status', permission_classes=[IsUserOrAdmin])
+    def get_video_status(self, request, *args, **kwargs):
+        try:
+            video = self.get_object()
+            if not video:
+                raise Http404({"detail": "Vídeo não encontrado."})
+            
+            return Response(
+                data={'status': video.status},
+                status=status.HTTP_200_OK
+            )
+
+        except PermissionDenied as fe:
+            return Response({"detail": "Arquivo de vídeo não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+        
+        except Exception as e:
+            return Response({'detail': 'Ocorreu um erro inesperado. Tente novamente mais tarde.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

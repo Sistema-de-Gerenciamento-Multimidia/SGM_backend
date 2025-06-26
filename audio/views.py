@@ -8,14 +8,11 @@ from rest_framework import viewsets, serializers, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
-from app.services.aws_services import aws_services
 from audio.permissions import IsUserOrAdmin
 from app.services.audio_services import (
     extract_audio_info,
-    save_video_in_temporary_file,
-    remove_video_in_temporary_file
 )
-from app.utils.s3_utils import extract_s3_key
+from app.utils import save_media, generate_sha256_file_hash, is_file_duplicated, remove_media
 from audio.models import Audio
 from audio.serializers import AudioCreateSerializer, AudioUpdateListDetailSerializer, AudioPartialUpdateSerializer
 
@@ -49,12 +46,16 @@ class AudioCRUDView(viewsets.ModelViewSet):
             audio_file = serializer.validated_data.get('audio_file')
             audio_file_name = audio_file.name
             audio_file_path = os.path.join(settings.MEDIA_ROOT, 'audio_files', audio_file_name)
+            audio_file_hash = generate_sha256_file_hash(audio_file, self.request.user)
+            
+            if is_file_duplicated(audio_file_hash, 'Audio', self.request.user):
+                return Response(
+                    data={'detail': 'Arquivo já enviado anteriormente ao sistema.'},
+                    status=status.HTTP_409_CONFLICT
+                )
             
             os.makedirs(os.path.dirname(audio_file_path), exist_ok=True)
-            save_video_in_temporary_file(audio_file, audio_file_path)
-            
-            # Salva o arquivo de áudio no bucket
-            s3_audio_path = aws_services.upload_audio_to_s3(audio_file_name, audio_file_path, self.request.user.id)
+            save_media(audio_file, audio_file_path)
             
             audio_metadata = extract_audio_info(audio_file_path)
             
@@ -64,7 +65,8 @@ class AudioCRUDView(viewsets.ModelViewSet):
                     file_name=audio_file_name,
                     file_size=audio_file.size,
                     mime_type=audio_file.content_type,
-                    file_path=s3_audio_path,
+                    file_path=audio_file_path,
+                    file_hash=audio_file_hash,
                     **audio_metadata,
                     description=serializer.validated_data.get('description', ''),
                     tags=serializer.validated_data.get('tags', []),
@@ -80,17 +82,8 @@ class AudioCRUDView(viewsets.ModelViewSet):
         except serializers.ValidationError as e:
             return Response({'detail': f'Dados inválidos. Verifique e tente novamente'}, status=status.HTTP_400_BAD_REQUEST)
 
-        except NoCredentialsError:
-            return Response({'detail': 'Erro ao acessar o S3: credenciais ausentes.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-        except BotoCoreError as e:
-            return Response({'detail': 'Erro ao fazer upload do áudio para o S3.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
         except IntegrityError:
             return Response({'detail': 'Erro ao salvar o áudio. Verifique os dados e tente novamente.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        except subprocess.CalledProcessError:
-            return Response({'detail': 'Erro durante o processamento do áudio'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
         except FileNotFoundError as e:
             return Response({'detail': f'Arquivo de áudio não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
@@ -98,8 +91,6 @@ class AudioCRUDView(viewsets.ModelViewSet):
         except Exception as e:
             return Response({'detail': f'Ocorreu um erro inesperado. Tente novamente mais tarde.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
-        finally:
-            remove_video_in_temporary_file(audio_file_path)
             
     def list(self, request, *args, **kwargs):
         try:
@@ -181,7 +172,7 @@ class AudioCRUDView(viewsets.ModelViewSet):
         )
         
     def partial_update(self, request, *args, **kwargs):
-        # try:
+        try:
             # Obtendo o vídeo existente
             audio_instance = self.get_object()
             if not audio_instance:
@@ -195,24 +186,24 @@ class AudioCRUDView(viewsets.ModelViewSet):
             if 'file_name' in serializer.validated_data:
                 new_file_name = serializer.validated_data['file_name']
                 
-                local_download_old_audio_path = os.path.join(settings.MEDIA_ROOT, 'audio_files', audio_instance.file_name)
-                # Baixa o arquivo já existente no s3
-                aws_services.download_audio_from_s3(extract_s3_key(audio_instance.file_path), local_download_old_audio_path)
                 
-                # Define o novo caminho do arquivo com o novo nome
-                new_file_path = os.path.join(settings.MEDIA_ROOT, 'audio_files', new_file_name)
+                _, file_extension = os.path.splitext(audio_instance.file_name)
+                new_file_name_with_ext = new_file_name + file_extension
+                
+                old_audio_path = os.path.join(settings.MEDIA_ROOT, 'audio_files', audio_instance.file_name)
+                new_file_path = os.path.join(settings.MEDIA_ROOT, 'audio_files', new_file_name_with_ext)
                 
                 # Renomeia o arquivo
-                os.rename(local_download_old_audio_path, new_file_path)
-                
-                # Faz o upload do arquivo renomeado para o S3
-                new_s3_path = aws_services.upload_audio_to_s3(new_file_name, new_file_path, self.request.user.id)
-
-                aws_services.delete_object_from_s3(extract_s3_key(audio_instance.file_path))
-                
-                # Atualiza os dados da instância no banco de dados
-                audio_instance.file_name = new_file_name
-                audio_instance.file_path = new_s3_path
+                if os.path.exists(old_audio_path):
+                    os.rename(old_audio_path, new_file_path)
+                    # Atualiza os dados da instância no banco de dados
+                    audio_instance.file_name = new_file_name_with_ext
+                    audio_instance.file_path = new_file_path
+                else:
+                    return Response(
+                        data={'error': 'Arquivo de áudio não encontrado.'},
+                        status=status.HTTP_404_NOT_FOUND
+                    )
                 
                 # Extraindo os metadados atualizados do novo arquivo
                 audio_metadata = extract_audio_info(new_file_path)
@@ -230,34 +221,32 @@ class AudioCRUDView(viewsets.ModelViewSet):
                 
             # Salva as alterações no banco de dados
             audio_instance.save()
-            
-            os.remove(new_file_path)
 
             return Response(
                 data=AudioUpdateListDetailSerializer(audio_instance).data,
                 status=status.HTTP_200_OK
             )
         
-        # except ValueError:
-        #     return Response({'detail': 'Áudio não encontrado'}, status=status.HTTP_404_NOT_FOUND)
+        except ValueError:
+            return Response({'detail': 'Áudio não encontrado'}, status=status.HTTP_404_NOT_FOUND)
         
-        # except NoCredentialsError:
-        #     return Response({'detail': 'Erro ao acessar o S3: credenciais ausentes.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        except NoCredentialsError:
+            return Response({'detail': 'Erro ao acessar o S3: credenciais ausentes.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        # except BotoCoreError as e:
-        #     return Response({'detail': 'Erro ao fazer upload do áudio para o S3.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        except BotoCoreError as e:
+            return Response({'detail': 'Erro ao fazer upload do áudio para o S3.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        # except IntegrityError:
-        #     return Response({'detail': 'Erro ao salvar o áudio. Verifique os dados e tente novamente. '}, status=status.HTTP_400_BAD_REQUEST)
+        except IntegrityError:
+            return Response({'detail': 'Erro ao salvar o áudio. Verifique os dados e tente novamente. '}, status=status.HTTP_400_BAD_REQUEST)
 
-        # except subprocess.CalledProcessError:
-        #     return Response({'detail': 'Erro durante o processamento do áudio'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        except subprocess.CalledProcessError:
+            return Response({'detail': 'Erro durante o processamento do áudio'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
-        # except FileNotFoundError as e:
-        #     return Response({'detail': f'Arquivo de áudio não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+        except FileNotFoundError as e:
+            return Response({'detail': f'Arquivo de áudio não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
 
-        # except Exception as e:
-        #     return Response({'detail': f'Ocorreu um erro inesperado. Tente novamente mais tarde.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        except Exception as e:
+            return Response({'detail': f'Ocorreu um erro inesperado. Tente novamente mais tarde.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
     def destroy(self, request, *args, **kwargs):
         try:
@@ -267,8 +256,7 @@ class AudioCRUDView(viewsets.ModelViewSet):
             if not audio_object:
                 raise ValueError('Vídeo não encontrado.')
             
-            # Remove thumbnail
-            aws_services.delete_object_from_s3(extract_s3_key(audio_object.file_path))
+            remove_media(audio_object.file_path)
             
             return super().destroy(request, *args, **kwargs)
         
